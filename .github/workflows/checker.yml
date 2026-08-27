@@ -40,8 +40,15 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git add progress.json found.txt
+          git add progress.json
 
-          git diff --cached --quiet || git commit -m "Update username finder progress"
+          if [ -f found.txt ]; then
+            git add found.txt
+          fi
 
-          git push
+          if git diff --cached --quiet; then
+            echo "No progress changes to commit."
+          else
+            git commit -m "Update username finder progress"
+            git push
+          fi
