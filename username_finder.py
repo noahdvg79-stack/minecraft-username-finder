@@ -9,34 +9,55 @@ import requests
 
 
 # ============================================================
-# CONFIG
+# CONFIGURATION
 # ============================================================
 
-# How many characters to check.
-# Start with 3. You can later add 4, but 4-character names
-# create 456,976 combinations with letters only.
+# Username lengths to scan.
+#
+# Start with 3.
+#
+# IMPORTANT:
+# 3 characters = 37^3 = 50,653 combinations
+# 4 characters = 37^4 = 1,874,161 combinations
+#
+# We will make the scanner continue where it left off.
 LENGTHS = [3]
 
-# Characters allowed in usernames.
-# Minecraft usernames use letters, numbers and underscores.
-CHARACTERS = string.ascii_lowercase + string.digits
 
-# Set to True if you want underscores included.
-USE_UNDERSCORE = False
+# Supported Minecraft Java username characters:
+#
+# a-z
+# 0-9
+# _
+#
+# Minecraft username lookup is case-insensitive, so checking
+# uppercase versions separately is unnecessary.
+CHARACTERS = string.ascii_lowercase + string.digits + "_"
 
-# Maximum number of usernames sent to Mojang per request.
+
+# Mojang's public profile lookup accepts up to 10 usernames.
 BATCH_SIZE = 10
 
-# Seconds to wait between API requests.
-# Keep this conservative.
+
+# Delay between requests.
+#
+# Keep this conservative to reduce the chance of rate limiting.
 DELAY_BETWEEN_REQUESTS = 2
 
-# Maximum number of batches to process during one GitHub Actions run.
-# This prevents the workflow from running forever.
+
+# Maximum number of API batches during one GitHub Actions run.
+#
+# 10 batches x 10 usernames = 100 usernames per run.
 MAX_BATCHES_PER_RUN = 10
 
-# Files used to remember progress.
+
+# ============================================================
+# FILES
+# ============================================================
+
 PROGRESS_FILE = Path("progress.json")
+
+# Names that have already generated an alert.
 FOUND_FILE = Path("found.txt")
 
 
@@ -44,29 +65,50 @@ FOUND_FILE = Path("found.txt")
 # DISCORD
 # ============================================================
 
+# This comes from the GitHub Actions secret.
+#
+# DO NOT put the actual webhook URL in this file.
 DISCORD_WEBHOOK = os.environ.get("DISCORD_WEBHOOK")
 
 
 def send_discord(username):
+    """Send a username notification to Discord."""
+
     if not DISCORD_WEBHOOK:
-        print("DISCORD_WEBHOOK secret is missing.")
-        return
+        print("ERROR: DISCORD_WEBHOOK secret is missing.")
+        return False
 
     message = {
-        "content": f"🎉 **Minecraft username found:** `{username}`"
+        "content": (
+            "🎉 **Minecraft username candidate found!**\n"
+            f"Username: `{username}`\n"
+            "\n"
+            "⚠️ This name was not found in Mojang's public "
+            "profile lookup. It is a candidate and is NOT "
+            "guaranteed to be immediately claimable."
+        )
     }
 
-    response = requests.post(
-        DISCORD_WEBHOOK,
-        json=message,
-        timeout=15
+    try:
+        response = requests.post(
+            DISCORD_WEBHOOK,
+            json=message,
+            timeout=15
+        )
+    except requests.RequestException as error:
+        print(f"Discord network error: {error}")
+        return False
+
+    if response.status_code in (200, 204):
+        print(f"Discord notification sent for: {username}")
+        return True
+
+    print(
+        f"Discord error: {response.status_code} "
+        f"{response.text}"
     )
 
-    if response.status_code not in (200, 204):
-        print(
-            f"Discord error: {response.status_code} "
-            f"{response.text}"
-        )
+    return False
 
 
 # ============================================================
@@ -74,6 +116,8 @@ def send_discord(username):
 # ============================================================
 
 def load_progress():
+    """Load the scanner's saved position."""
+
     if not PROGRESS_FILE.exists():
         return {
             "length_index": 0,
@@ -81,8 +125,22 @@ def load_progress():
         }
 
     try:
-        return json.loads(PROGRESS_FILE.read_text())
-    except Exception:
+        data = json.loads(
+            PROGRESS_FILE.read_text()
+        )
+
+        return {
+            "length_index": int(
+                data.get("length_index", 0)
+            ),
+            "combination_index": int(
+                data.get("combination_index", 0)
+            )
+        }
+
+    except (ValueError, TypeError, json.JSONDecodeError):
+        print("Invalid progress file. Starting from the beginning.")
+
         return {
             "length_index": 0,
             "combination_index": 0
@@ -90,18 +148,21 @@ def load_progress():
 
 
 def save_progress(length_index, combination_index):
+    """Save the scanner's current position."""
+
+    data = {
+        "length_index": length_index,
+        "combination_index": combination_index
+    }
+
     PROGRESS_FILE.write_text(
-        json.dumps(
-            {
-                "length_index": length_index,
-                "combination_index": combination_index
-            },
-            indent=2
-        )
+        json.dumps(data, indent=2)
     )
 
 
 def load_found():
+    """Load usernames that have already generated alerts."""
+
     if not FOUND_FILE.exists():
         return set()
 
@@ -113,22 +174,25 @@ def load_found():
 
 
 def save_found(username):
+    """Remember a username that generated an alert."""
+
     with FOUND_FILE.open("a") as file:
-        file.write(username + "\n")
+        file.write(username.lower() + "\n")
 
 
 # ============================================================
-# MINECRAFT LOOKUP
+# MINECRAFT API
 # ============================================================
 
 def check_batch(usernames):
     """
-    Mojang's public endpoint accepts up to 10 usernames at once.
+    Check a batch of Minecraft usernames using Mojang's
+    public profile lookup endpoint.
 
-    It returns profiles that currently resolve to Minecraft
-    usernames. Names not returned are candidates for further
-    investigation, but are NOT guaranteed to be immediately
-    claimable.
+    Names returned by Mojang currently resolve to profiles.
+
+    Names NOT returned are treated as CANDIDATES only.
+    They are NOT guaranteed to be immediately claimable.
     """
 
     url = "https://api.mojang.com/profiles/minecraft"
@@ -142,32 +206,40 @@ def check_batch(usernames):
             },
             timeout=20
         )
+
     except requests.RequestException as error:
-        print(f"Network error: {error}")
+        print(f"Mojang network error: {error}")
         return None
 
     if response.status_code == 429:
-        print("Mojang rate limit reached. Stopping this run.")
+        print(
+            "Mojang rate limit reached. "
+            "Stopping this run."
+        )
         return None
 
     if response.status_code != 200:
         print(
             f"Mojang API error: "
-            f"{response.status_code} {response.text}"
+            f"{response.status_code} "
+            f"{response.text}"
         )
         return None
 
     try:
         profiles = response.json()
-    except Exception:
-        print("Could not read Mojang response.")
+
+    except ValueError:
+        print("Could not read Mojang API response.")
         return None
 
-    taken = {
-        profile["name"].lower()
-        for profile in profiles
-        if "name" in profile
-    }
+    taken = set()
+
+    for profile in profiles:
+        name = profile.get("name")
+
+        if name:
+            taken.add(name.lower())
 
     return taken
 
@@ -176,20 +248,11 @@ def check_batch(usernames):
 # NAME GENERATOR
 # ============================================================
 
-def get_characters():
-    chars = CHARACTERS
-
-    if USE_UNDERSCORE:
-        chars += "_"
-
-    return chars
-
-
 def generate_names(length):
-    characters = get_characters()
+    """Generate every username combination of a given length."""
 
     for combination in itertools.product(
-        characters,
+        CHARACTERS,
         repeat=length
     ):
         yield "".join(combination)
@@ -200,12 +263,24 @@ def generate_names(length):
 # ============================================================
 
 def main():
-    print("======================================")
-    print(" Minecraft Username Finder")
-    print("======================================")
+
+    print("==========================================")
+    print("     Minecraft Username Finder")
+    print("==========================================")
+
+    print(f"Lengths: {LENGTHS}")
+    print(f"Characters: {CHARACTERS}")
+    print(f"Batch size: {BATCH_SIZE}")
+    print(
+        f"Maximum batches this run: "
+        f"{MAX_BATCHES_PER_RUN}"
+    )
 
     if not DISCORD_WEBHOOK:
-        print("WARNING: DISCORD_WEBHOOK is not configured.")
+        print()
+        print(
+            "WARNING: DISCORD_WEBHOOK is not configured."
+        )
 
     progress = load_progress()
     found = load_found()
@@ -215,32 +290,61 @@ def main():
 
     batches_processed = 0
 
+    # --------------------------------------------------------
+    # Process each configured username length.
+    # --------------------------------------------------------
+
     for current_length_index in range(
         length_index,
         len(LENGTHS)
     ):
+
         length = LENGTHS[current_length_index]
 
-        print(f"\nChecking {length}-character usernames...")
+        print()
+        print(
+            f"Checking {length}-character usernames..."
+        )
+
+        total_combinations = len(CHARACTERS) ** length
+
+        print(
+            f"Total combinations for this length: "
+            f"{total_combinations:,}"
+        )
 
         generator = generate_names(length)
 
-        # Resume from where the previous cloud run stopped.
+        # ----------------------------------------------------
+        # Resume from previous GitHub Actions run.
+        # ----------------------------------------------------
+
         start_index = (
             combination_index
             if current_length_index == length_index
             else 0
         )
 
-        for _ in range(start_index):
-            try:
-                next(generator)
-            except StopIteration:
-                break
+        if start_index > 0:
+            print(
+                f"Resuming from combination "
+                f"{start_index:,}..."
+            )
+
+            for _ in range(start_index):
+                try:
+                    next(generator)
+                except StopIteration:
+                    break
 
         batch = []
 
+        # ----------------------------------------------------
+        # Generate batches.
+        # ----------------------------------------------------
+
         for username in generator:
+
             batch.append(username)
 
             if len(batch) < BATCH_SIZE:
@@ -249,31 +353,58 @@ def main():
             batches_processed += 1
 
             print(
-                f"Checking batch #{batches_processed}: "
+                f"Batch {batches_processed}/"
+                f"{MAX_BATCHES_PER_RUN}: "
                 f"{batch[0]} -> {batch[-1]}"
             )
 
             taken = check_batch(batch)
 
+            # ------------------------------------------------
+            # If the API fails or rate-limits us, stop.
+            # Progress is saved so the next run continues.
+            # ------------------------------------------------
+
             if taken is None:
+
+                combination_index += len(batch)
+
                 save_progress(
                     current_length_index,
-                    combination_index + len(batch)
+                    combination_index
                 )
+
+                print(
+                    "Progress saved. "
+                    "The next run will continue from here."
+                )
+
                 return
 
-            # Names returned by Mojang currently resolve to profiles.
-            # Anything not returned is a candidate.
+            # ------------------------------------------------
+            # Find candidates.
+            # ------------------------------------------------
+
             for candidate in batch:
+
                 if candidate.lower() not in taken:
+
                     if candidate.lower() not in found:
+
                         print(
-                            f"Candidate found: {candidate}"
+                            f"Candidate found: "
+                            f"{candidate}"
                         )
 
-                        send_discord(candidate)
-                        save_found(candidate)
-                        found.add(candidate.lower())
+                        if send_discord(candidate):
+                            save_found(candidate)
+                            found.add(
+                                candidate.lower()
+                            )
+
+            # ------------------------------------------------
+            # Save progress after every successful batch.
+            # ------------------------------------------------
 
             combination_index += len(batch)
 
@@ -284,18 +415,38 @@ def main():
 
             batch = []
 
+            # ------------------------------------------------
+            # Stop after the configured number of batches.
+            # ------------------------------------------------
+
             if batches_processed >= MAX_BATCHES_PER_RUN:
+
+                print()
                 print(
-                    "\nMaximum batches reached. "
-                    "GitHub Actions will continue from here "
-                    "on the next scheduled run."
+                    "Maximum batches reached."
                 )
+
+                print(
+                    "Progress has been saved."
+                )
+
+                print(
+                    "GitHub Actions will continue "
+                    "from here on the next run."
+                )
+
                 return
 
-            time.sleep(DELAY_BETWEEN_REQUESTS)
+            time.sleep(
+                DELAY_BETWEEN_REQUESTS
+            )
 
-        # Handle final partial batch.
+        # ----------------------------------------------------
+        # Process a final partial batch.
+        # ----------------------------------------------------
+
         if batch:
+
             batches_processed += 1
 
             print(
@@ -306,26 +457,39 @@ def main():
             taken = check_batch(batch)
 
             if taken is None:
+
+                combination_index += len(batch)
+
                 save_progress(
                     current_length_index,
-                    combination_index + len(batch)
+                    combination_index
                 )
+
                 return
 
             for candidate in batch:
+
                 if candidate.lower() not in taken:
+
                     if candidate.lower() not in found:
+
                         print(
-                            f"Candidate found: {candidate}"
+                            f"Candidate found: "
+                            f"{candidate}"
                         )
 
-                        send_discord(candidate)
-                        save_found(candidate)
-                        found.add(candidate.lower())
+                        if send_discord(candidate):
+                            save_found(candidate)
+                            found.add(
+                                candidate.lower()
+                            )
 
             combination_index += len(batch)
 
-        # Move to next username length.
+        # ----------------------------------------------------
+        # Finished this username length.
+        # ----------------------------------------------------
+
         save_progress(
             current_length_index + 1,
             0
@@ -333,7 +497,15 @@ def main():
 
         combination_index = 0
 
-    print("\nFinished all configured names.")
+        print(
+            f"Finished all {length}-character "
+            "combinations."
+        )
+
+    print()
+    print("==========================================")
+    print("Finished all configured username lengths.")
+    print("==========================================")
 
 
 if __name__ == "__main__":
