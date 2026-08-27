@@ -8,7 +8,7 @@ from pathlib import Path
 import requests
 
 
-USERNAME_LENGTH = 4
+USERNAME_LENGTH = 8
 CHARACTERS = string.ascii_lowercase + string.digits + "_"
 BATCH_SIZE = 10
 DELAY_BETWEEN_REQUESTS = 1.0
