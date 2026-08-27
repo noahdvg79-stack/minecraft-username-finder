@@ -7,17 +7,16 @@ on:
     - cron: "*/5 * * * *"
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   check-usernames:
     runs-on: ubuntu-latest
 
     steps:
+
       - name: Download repository
         uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -29,26 +28,8 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests
 
-      - name: Run username finder
+      - name: Run Minecraft username test
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
         run: |
           python username_finder.py
-
-      - name: Save progress
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          git add progress.json
-
-          if [ -f found.txt ]; then
-            git add found.txt
-          fi
-
-          if git diff --cached --quiet; then
-            echo "No progress changes to commit."
-          else
-            git commit -m "Update username finder progress"
-            git push
-          fi
