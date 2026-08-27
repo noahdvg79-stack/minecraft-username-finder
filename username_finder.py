@@ -11,20 +11,16 @@ import requests
 # CONFIGURATION
 # ============================================================
 
-# EXACTLY 3 CHARACTERS.
-MIN_LENGTH = 3
-MAX_LENGTH = 3
+# EXACTLY 3 CHARACTERS
+USERNAME_LENGTH = 3
 
-# Minecraft Java username characters.
+# Minecraft Java username characters
 CHARACTERS = string.ascii_lowercase + string.digits + "_"
 
-# Mojang supports batches of up to 10 usernames.
+# Mojang batch size
 BATCH_SIZE = 10
 
-# Number of batches per GitHub Actions run.
-MAX_BATCHES_PER_RUN = 10
-
-# Delay between Mojang requests.
+# Wait between Mojang requests
 DELAY_BETWEEN_REQUESTS = 2
 
 
@@ -44,10 +40,9 @@ DISCORD_WEBHOOK = os.environ.get("DISCORD_WEBHOOK")
 
 
 def send_discord(username):
-    """Send a possible available username to Discord."""
 
     if not DISCORD_WEBHOOK:
-        print("ERROR: DISCORD_WEBHOOK secret is missing.")
+        print("ERROR: DISCORD_WEBHOOK is missing.")
         return False
 
     payload = {
@@ -58,9 +53,9 @@ def send_discord(username):
                     f"**Username:** `{username}`\n\n"
                     "Mojang did not return a profile for "
                     "this username.\n\n"
-                    "⚠️ This is a possible available name, "
-                    "not a guarantee that it can immediately "
-                    "be claimed."
+                    "⚠️ This is a possible candidate, "
+                    "not a guarantee that the name can "
+                    "immediately be claimed."
                 )
             }
         ]
@@ -74,9 +69,7 @@ def send_discord(username):
         )
 
     except requests.RequestException as error:
-        print(
-            f"Discord network error: {error}"
-        )
+        print(f"Discord network error: {error}")
         return False
 
     if response.status_code not in (200, 204):
@@ -99,7 +92,6 @@ def send_discord(username):
 # ============================================================
 
 def load_checked():
-    """Load usernames that have already been checked."""
 
     if not CHECKED_FILE.exists():
         return set()
@@ -112,9 +104,9 @@ def load_checked():
 
 
 def save_checked(usernames):
-    """Save checked usernames."""
 
     with CHECKED_FILE.open("a") as file:
+
         for username in usernames:
             file.write(
                 username.lower() + "\n"
@@ -122,7 +114,6 @@ def save_checked(usernames):
 
 
 def load_found():
-    """Load usernames already sent to Discord."""
 
     if not FOUND_FILE.exists():
         return set()
@@ -135,7 +126,6 @@ def load_found():
 
 
 def save_found(username):
-    """Save a username that was sent to Discord."""
 
     with FOUND_FILE.open("a") as file:
         file.write(
@@ -144,40 +134,31 @@ def save_found(username):
 
 
 # ============================================================
-# RANDOM 3-CHARACTER GENERATOR
+# RANDOM USERNAME GENERATOR
 # ============================================================
 
 def generate_random_username():
-    """Generate exactly 3 Minecraft username characters."""
 
     return "".join(
         random.choice(CHARACTERS)
-        for _ in range(3)
+        for _ in range(USERNAME_LENGTH)
     )
 
 
 def generate_unique_batch(checked):
-    """
-    Generate a batch of unique random 3-character names
-    that haven't already been checked.
-    """
 
     usernames = []
     batch_lower = set()
 
     attempts = 0
-    maximum_attempts = BATCH_SIZE * 100
 
-    while (
-        len(usernames) < BATCH_SIZE
-        and attempts < maximum_attempts
-    ):
+    while len(usernames) < BATCH_SIZE:
 
         username = generate_random_username()
 
-        attempts += 1
-
         username_lower = username.lower()
+
+        attempts += 1
 
         if username_lower in checked:
             continue
@@ -186,6 +167,7 @@ def generate_unique_batch(checked):
             continue
 
         usernames.append(username)
+
         batch_lower.add(username_lower)
 
     return usernames
@@ -196,17 +178,11 @@ def generate_unique_batch(checked):
 # ============================================================
 
 def check_batch(usernames):
-    """
-    Check up to 10 Minecraft usernames.
-
-    Names returned by Mojang currently resolve to profiles.
-
-    Names not returned are treated as possible candidates.
-    """
 
     url = "https://api.mojang.com/profiles/minecraft"
 
     try:
+
         response = requests.post(
             url,
             json=usernames,
@@ -217,9 +193,11 @@ def check_batch(usernames):
         )
 
     except requests.RequestException as error:
+
         print(
             f"Mojang network error: {error}"
         )
+
         return None
 
     print(
@@ -228,25 +206,32 @@ def check_batch(usernames):
     )
 
     if response.status_code == 429:
+
         print(
             "Mojang rate limit reached."
         )
+
         return None
 
     if response.status_code != 200:
+
         print(
             f"Mojang API error: "
             f"{response.text}"
         )
+
         return None
 
     try:
+
         profiles = response.json()
 
     except ValueError:
+
         print(
             "Mojang returned invalid JSON."
         )
+
         return None
 
     taken = set()
@@ -270,24 +255,29 @@ def check_batch(usernames):
 def main():
 
     print("==========================================")
-    print("   Minecraft 3-Letter Username Finder")
+    print(" Minecraft 3-Letter Username Finder")
+    print(" CONTINUOUS MODE")
     print("==========================================")
 
     print()
-    print("Username length: EXACTLY 3")
+
+    print(
+        "Username length: EXACTLY 3"
+    )
+
     print(
         f"Characters: {CHARACTERS}"
     )
 
     print(
-        f"Batches this run: "
-        f"{MAX_BATCHES_PER_RUN}"
+        "Mode: RUN UNTIL GITHUB STOPS THE JOB"
     )
 
     checked = load_checked()
     found = load_found()
 
     print()
+
     print(
         f"Previously checked: "
         f"{len(checked):,}"
@@ -300,26 +290,50 @@ def main():
 
     print()
 
-    batches_processed = 0
+    batch_number = 0
 
-    while batches_processed < MAX_BATCHES_PER_RUN:
+    while True:
+
+        # ----------------------------------------------------
+        # Check whether all 3-character combinations
+        # have eventually been exhausted.
+        # ----------------------------------------------------
+
+        total_possible = (
+            len(CHARACTERS)
+            ** USERNAME_LENGTH
+        )
+
+        if len(checked) >= total_possible:
+
+            print()
+            print(
+                "=========================================="
+            )
+
+            print(
+                "ALL 3-CHARACTER NAMES HAVE BEEN CHECKED."
+            )
+
+            print(
+                "=========================================="
+            )
+
+            break
+
+        # ----------------------------------------------------
+        # Generate a completely random unused batch.
+        # ----------------------------------------------------
 
         batch = generate_unique_batch(
             checked
         )
 
-        if not batch:
+        batch_number += 1
 
-            print(
-                "Could not generate enough "
-                "new usernames."
-            )
-
-            break
-
+        print()
         print(
-            f"Batch {batches_processed + 1}/"
-            f"{MAX_BATCHES_PER_RUN}"
+            f"Batch #{batch_number}"
         )
 
         print(
@@ -330,18 +344,36 @@ def main():
             "  " + ", ".join(batch)
         )
 
+        # ----------------------------------------------------
+        # Ask Mojang.
+        # ----------------------------------------------------
+
         taken = check_batch(batch)
+
+        # ----------------------------------------------------
+        # If Mojang fails, stop this run.
+        # GitHub can start it again later.
+        # ----------------------------------------------------
 
         if taken is None:
 
+            print()
+
             print(
-                "Stopping because the Minecraft "
-                "lookup failed."
+                "Mojang lookup failed or was "
+                "rate-limited."
+            )
+
+            print(
+                "Stopping this run safely."
             )
 
             break
 
-        # Remember every successfully checked name.
+        # ----------------------------------------------------
+        # Remember every checked name.
+        # ----------------------------------------------------
+
         save_checked(batch)
 
         checked.update(
@@ -349,10 +381,15 @@ def main():
             for username in batch
         )
 
-        # Only possible candidates are sent to Discord.
+        # ----------------------------------------------------
+        # ONLY send possible candidates to Discord.
+        # ----------------------------------------------------
+
         for username in batch:
 
-            if username.lower() in taken:
+            username_lower = username.lower()
+
+            if username_lower in taken:
 
                 print(
                     f"TAKEN: {username}"
@@ -365,37 +402,33 @@ def main():
                 f"{username}"
             )
 
-            if username.lower() not in found:
+            if username_lower not in found:
 
                 if send_discord(username):
 
                     save_found(username)
 
                     found.add(
-                        username.lower()
+                        username_lower
                     )
 
-        batches_processed += 1
+        # ----------------------------------------------------
+        # Show progress.
+        # ----------------------------------------------------
 
-        if batches_processed >= MAX_BATCHES_PER_RUN:
-            break
+        print(
+            f"Progress: "
+            f"{len(checked):,}/"
+            f"{total_possible:,}"
+        )
+
+        # ----------------------------------------------------
+        # Wait before the next request.
+        # ----------------------------------------------------
 
         time.sleep(
             DELAY_BETWEEN_REQUESTS
         )
-
-    print()
-    print("==========================================")
-    print("Run complete.")
-    print(
-        f"Batches checked: "
-        f"{batches_processed}"
-    )
-    print(
-        f"Total names checked: "
-        f"{len(checked):,}"
-    )
-    print("==========================================")
 
 
 if __name__ == "__main__":
