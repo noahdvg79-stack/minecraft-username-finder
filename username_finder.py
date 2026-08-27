@@ -11,27 +11,20 @@ import requests
 # CONFIGURATION
 # ============================================================
 
-# Minimum and maximum username length.
-#
-# Minecraft Java usernames are 3-16 characters.
+# EXACTLY 3 CHARACTERS.
 MIN_LENGTH = 3
 MAX_LENGTH = 3
 
-
-# Characters supported by Minecraft Java usernames.
+# Minecraft Java username characters.
 CHARACTERS = string.ascii_lowercase + string.digits + "_"
 
-
-# How many random usernames to check per GitHub Actions run.
-#
-# Each Mojang request can contain up to 10 usernames.
+# Mojang supports batches of up to 10 usernames.
 BATCH_SIZE = 10
+
+# Number of batches per GitHub Actions run.
 MAX_BATCHES_PER_RUN = 10
 
-
-# Delay between API requests.
-#
-# Keep this reasonable so we don't hammer Mojang.
+# Delay between Mojang requests.
 DELAY_BETWEEN_REQUESTS = 2
 
 
@@ -51,7 +44,7 @@ DISCORD_WEBHOOK = os.environ.get("DISCORD_WEBHOOK")
 
 
 def send_discord(username):
-    """Send an available-name candidate to Discord."""
+    """Send a possible available username to Discord."""
 
     if not DISCORD_WEBHOOK:
         print("ERROR: DISCORD_WEBHOOK secret is missing.")
@@ -60,14 +53,14 @@ def send_discord(username):
     payload = {
         "embeds": [
             {
-                "title": "🟢 Possible Minecraft Username",
+                "title": "🟢 Possible 3-Letter Minecraft Username",
                 "description": (
                     f"**Username:** `{username}`\n\n"
-                    "Mojang did not return a profile for this "
-                    "username.\n\n"
+                    "Mojang did not return a profile for "
+                    "this username.\n\n"
                     "⚠️ This is a possible available name, "
-                    "not a guarantee. It may be on cooldown "
-                    "or otherwise unavailable."
+                    "not a guarantee that it can immediately "
+                    "be claimed."
                 )
             }
         ]
@@ -81,7 +74,9 @@ def send_discord(username):
         )
 
     except requests.RequestException as error:
-        print(f"Discord network error: {error}")
+        print(
+            f"Discord network error: {error}"
+        )
         return False
 
     if response.status_code not in (200, 204):
@@ -100,7 +95,7 @@ def send_discord(username):
 
 
 # ============================================================
-# CHECKED NAME DATABASE
+# DATABASE
 # ============================================================
 
 def load_checked():
@@ -117,11 +112,13 @@ def load_checked():
 
 
 def save_checked(usernames):
-    """Save usernames that were checked."""
+    """Save checked usernames."""
 
     with CHECKED_FILE.open("a") as file:
         for username in usernames:
-            file.write(username.lower() + "\n")
+            file.write(
+                username.lower() + "\n"
+            )
 
 
 def load_found():
@@ -138,37 +135,35 @@ def load_found():
 
 
 def save_found(username):
-    """Remember a username that was sent to Discord."""
+    """Save a username that was sent to Discord."""
 
     with FOUND_FILE.open("a") as file:
-        file.write(username.lower() + "\n")
+        file.write(
+            username.lower() + "\n"
+        )
 
 
 # ============================================================
-# RANDOM USERNAME GENERATOR
+# RANDOM 3-CHARACTER GENERATOR
 # ============================================================
 
 def generate_random_username():
-    """Generate a completely random Minecraft username."""
-
-    length = random.randint(
-        MIN_LENGTH,
-        MAX_LENGTH
-    )
+    """Generate exactly 3 Minecraft username characters."""
 
     return "".join(
         random.choice(CHARACTERS)
-        for _ in range(length)
+        for _ in range(3)
     )
 
 
 def generate_unique_batch(checked):
     """
-    Generate a batch of random usernames that haven't
-    already been checked.
+    Generate a batch of unique random 3-character names
+    that haven't already been checked.
     """
 
     usernames = []
+    batch_lower = set()
 
     attempts = 0
     maximum_attempts = BATCH_SIZE * 100
@@ -182,16 +177,16 @@ def generate_unique_batch(checked):
 
         attempts += 1
 
-        if username.lower() in checked:
+        username_lower = username.lower()
+
+        if username_lower in checked:
             continue
 
-        if username.lower() in {
-            name.lower()
-            for name in usernames
-        }:
+        if username_lower in batch_lower:
             continue
 
         usernames.append(username)
+        batch_lower.add(username_lower)
 
     return usernames
 
@@ -206,7 +201,7 @@ def check_batch(usernames):
 
     Names returned by Mojang currently resolve to profiles.
 
-    Names NOT returned are treated as possible candidates.
+    Names not returned are treated as possible candidates.
     """
 
     url = "https://api.mojang.com/profiles/minecraft"
@@ -275,18 +270,13 @@ def check_batch(usernames):
 def main():
 
     print("==========================================")
-    print("   Minecraft RANDOM Username Finder")
+    print("   Minecraft 3-Letter Username Finder")
     print("==========================================")
 
     print()
+    print("Username length: EXACTLY 3")
     print(
-        f"Length range: "
-        f"{MIN_LENGTH}-{MAX_LENGTH}"
-    )
-
-    print(
-        f"Characters: "
-        f"{CHARACTERS}"
+        f"Characters: {CHARACTERS}"
     )
 
     print(
@@ -299,12 +289,12 @@ def main():
 
     print()
     print(
-        f"Previously checked names: "
+        f"Previously checked: "
         f"{len(checked):,}"
     )
 
     print(
-        f"Previously found candidates: "
+        f"Previously found: "
         f"{len(found):,}"
     )
 
@@ -319,9 +309,12 @@ def main():
         )
 
         if not batch:
+
             print(
-                "Could not generate a unique batch."
+                "Could not generate enough "
+                "new usernames."
             )
+
             break
 
         print(
@@ -342,27 +335,21 @@ def main():
         if taken is None:
 
             print(
-                "Stopping this run because "
-                "the Minecraft lookup failed."
+                "Stopping because the Minecraft "
+                "lookup failed."
             )
 
             break
 
-        # ----------------------------------------------------
-        # Save everything we successfully checked.
-        # ----------------------------------------------------
-
+        # Remember every successfully checked name.
         save_checked(batch)
 
         checked.update(
-            name.lower()
-            for name in batch
+            username.lower()
+            for username in batch
         )
 
-        # ----------------------------------------------------
-        # Find names that Mojang did NOT return.
-        # ----------------------------------------------------
-
+        # Only possible candidates are sent to Discord.
         for username in batch:
 
             if username.lower() in taken:
@@ -372,10 +359,6 @@ def main():
                 )
 
                 continue
-
-            # ------------------------------------------------
-            # Only possible available names get here.
-            # ------------------------------------------------
 
             print(
                 f"POSSIBLE AVAILABLE: "
@@ -405,11 +388,11 @@ def main():
     print("==========================================")
     print("Run complete.")
     print(
-        f"Total checked this run: "
-        f"{batches_processed * BATCH_SIZE}"
+        f"Batches checked: "
+        f"{batches_processed}"
     )
     print(
-        f"Total names remembered: "
+        f"Total names checked: "
         f"{len(checked):,}"
     )
     print("==========================================")
