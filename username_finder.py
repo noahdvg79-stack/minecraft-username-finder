@@ -15,7 +15,7 @@ import requests
 #
 # Minecraft Java usernames are 3-16 characters.
 MIN_LENGTH = 3
-MAX_LENGTH = 4
+MAX_LENGTH = 3
 
 
 # Characters supported by Minecraft Java usernames.
