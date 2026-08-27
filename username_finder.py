@@ -1,8 +1,3 @@
-```text
-PASTE THIS INTO username_finder.py
-
-import itertools
-import json
 import os
 import random
 import string
@@ -59,23 +54,17 @@ def load_names(filename):
     if not filename.exists():
         return set()
 
-    try:
-        return {
-            line.strip().lower()
-            for line in filename.read_text(
-                encoding="utf-8"
-            ).splitlines()
-            if line.strip()
-        }
-    except Exception:
-        return set()
+    return {
+        line.strip().lower()
+        for line in filename.read_text(
+            encoding="utf-8"
+        ).splitlines()
+        if line.strip()
+    }
 
 
 def save_name(filename, username):
-    with filename.open(
-        "a",
-        encoding="utf-8"
-    ) as file:
+    with filename.open("a", encoding="utf-8") as file:
         file.write(username.lower() + "\n")
 
 
@@ -92,7 +81,6 @@ def check_batch(usernames):
             },
             timeout=20
         )
-
     except requests.RequestException as error:
         print(f"Network error: {error}")
         return None
@@ -116,13 +104,11 @@ def check_batch(usernames):
         print("Could not read Mojang response.")
         return None
 
-    taken = {
+    return {
         profile["name"].lower()
         for profile in profiles
         if "name" in profile
     }
-
-    return taken
 
 
 def random_username():
@@ -161,19 +147,12 @@ def main():
     print("Mode: RUN FOREVER")
     print()
 
-    if not DISCORD_WEBHOOK:
-        print("WARNING: DISCORD_WEBHOOK is not configured.")
-        print()
-
     checked = load_names(CHECKED_FILE)
     found = load_names(FOUND_FILE)
 
     total_combinations = len(CHARACTERS) ** USERNAME_LENGTH
 
-    print(
-        f"Total possible combinations: "
-        f"{total_combinations:,}"
-    )
+    print(f"Total possible combinations: {total_combinations:,}")
     print(f"Previously checked: {len(checked):,}")
     print(f"Previously found: {len(found):,}")
     print()
@@ -181,17 +160,11 @@ def main():
     batch_number = 0
 
     while True:
-
         if len(checked) >= total_combinations:
-            print()
-            print("=" * 50)
-            print("Every possible 3-character combination")
-            print("has been checked.")
-            print("=" * 50)
+            print("Every possible 3-character name has been checked.")
             break
 
         batch_number += 1
-
         batch = generate_random_batch(checked)
 
         print(f"Batch #{batch_number}")
@@ -201,42 +174,27 @@ def main():
         taken = check_batch(batch)
 
         if taken is None:
-            print("Request failed.")
-            print("Waiting before trying again...")
+            print("Request failed. Waiting 10 seconds...")
             time.sleep(10)
             continue
 
         for username in batch:
-
             username_lower = username.lower()
 
             if username_lower in taken:
                 print(f"TAKEN: {username}")
-
             else:
-                print(
-                    f"POSSIBLY AVAILABLE: "
-                    f"{username}"
-                )
+                print(f"POSSIBLY AVAILABLE: {username}")
 
                 if username_lower not in found:
                     send_discord(username)
-
-                    save_name(
-                        FOUND_FILE,
-                        username
-                    )
-
+                    save_name(FOUND_FILE, username)
                     found.add(username_lower)
 
             if username_lower not in checked:
-                save_name(
-                    CHECKED_FILE,
-                    username
-                )
+                save_name(CHECKED_FILE, username)
                 checked.add(username_lower)
 
-        print()
         print(
             f"Progress: {len(checked):,}/"
             f"{total_combinations:,}"
@@ -248,4 +206,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-```
