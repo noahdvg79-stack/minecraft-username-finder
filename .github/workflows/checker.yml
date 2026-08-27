@@ -28,21 +28,24 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests
 
-      - name: Run random username finder
+      - name: Run random 3-letter username finder
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
         run: |
           python username_finder.py
 
-      - name: Save checked usernames
+      - name: Save username database
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
+          touch checked.txt
+          touch found.txt
+
           git add checked.txt found.txt
 
           if git diff --cached --quiet; then
-            echo "No changes to save."
+            echo "No database changes to save."
           else
             git commit -m "Update username finder database"
             git push
